@@ -1,0 +1,3 @@
+# Local interpreter caches are never release assets, including in example folders.
+global-exclude *.pyc *.pyo
+global-exclude */__pycache__/*
