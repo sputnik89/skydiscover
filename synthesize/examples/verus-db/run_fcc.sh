@@ -52,19 +52,7 @@ VERUS="$(command -v "$VERUS")" || fail 'VERUS does not name an executable'
 VERUS="$(cd "$(dirname "$VERUS")" && pwd)/$(basename "$VERUS")"
 export VERUS
 
-if [ -z "${VERUS_Z3_PATH:-}" ]; then
-  if [ -x "$(dirname "$VERUS")/z3" ]; then
-    VERUS_Z3_PATH="$(dirname "$VERUS")/z3"
-  elif command -v z3 >/dev/null 2>&1; then
-    VERUS_Z3_PATH="$(command -v z3)"
-  elif [ -x "$HOME/verdex/.venv/bin/z3" ]; then
-    VERUS_Z3_PATH="$HOME/verdex/.venv/bin/z3"
-  else
-    fail 'set VERUS_Z3_PATH to the Z3 executable required by your Verus version'
-  fi
-fi
-VERUS_Z3_PATH="$(command -v "$VERUS_Z3_PATH")" || fail 'VERUS_Z3_PATH does not name an executable'
-VERUS_Z3_PATH="$(cd "$(dirname "$VERUS_Z3_PATH")" && pwd)/$(basename "$VERUS_Z3_PATH")"
+VERUS_Z3_PATH=$HOME/verus/z3
 export VERUS_Z3_PATH
 "$VERUS" --version
 "$VERUS_Z3_PATH" -version
