@@ -321,7 +321,16 @@ def _failing_tests(checkpoint: Path, run_dir: Path) -> Optional[List[str]]:
     """The current tests a checkpoint fails, every test run once, all at the same time. [] means
     it passes. None means no verdict (no suite, or a test that could not run), so the caller
     keeps its selection."""
-    suite = Run(run_dir).tests
+    run = Run(run_dir)
+    if run.is_proof_run():
+        from . import proof
+
+        try:
+            proof.verify(run_dir, impl=checkpoint / ".verification/source", build_candidate=False)
+            return []
+        except (ValueError, OSError, subprocess.SubprocessError):
+            return ["complete formal verification"]
+    suite = run.tests
     entry = artifact_store.entry_in(checkpoint, run_dir)
     names = [p.name for p in test_files(suite)] if (suite / TEST_SCRIPT).is_file() else []
     if not names or entry is None:
@@ -497,6 +506,8 @@ def _scored_candidate_count(run_dir: Path) -> Optional[int]:
 
 def _provenance_lines(run_dir: Path, out: Path, checkpoints_before_publish: int) -> List[str]:
     """Warn when the result has fewer checkpoints than the leaderboard has scored candidates."""
+    if not Run(run_dir).requires_evaluation():
+        return ["  verification: proof-only run; no benchmark score is required."]
     lines: List[str] = []
     if checkpoints_before_publish == 0:
         lines.append(
@@ -572,6 +583,8 @@ def _verify_export(best: Path, run: Run, *, production_ready=False) -> None:
         (run.leaderboard, bundle.leaderboard),
         (run.decision_log, bundle.decision_log),
         (run.report, bundle.report),
+        (run.synthesis / "verified-build", bundle.synthesis / "verified-build"),
+        (run.loop_state, bundle.loop_state),
         (run.path / ".severity_snapshot.json", bundle.path / ".severity_snapshot.json"),
     ):
         if source.exists():
@@ -733,7 +746,10 @@ def export_deliverable(run_dir: Path, dest: Path, *, production_ready=False) -> 
     if checkpoint is None:
         # An unscored working copy must not be silently published.
         _, checkpoint = artifact_store.snapshot_run(
-            run_dir, dest, became_best=selected is None, require_evaluation=not run.is_proof_run()
+            run_dir,
+            dest,
+            became_best=selected is None,
+            require_evaluation=run.requires_evaluation(),
         )
     selected = artifact_store.selected_best_checkpoint(out) or checkpoint
     verdicts = _checkpoint_verdicts(out, run_dir)

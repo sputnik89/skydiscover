@@ -186,3 +186,5 @@ The profile path, bottleneck, and next lever are progress, not decision-log rows
 benchmark output and profiler dumps out of the handoff.
 
 Shared rules for every role: `skydiscover/synthesize/workflow/SKILL.md`, "Rules That Hold Everywhere".
+
+For `checked_by: proof` with `evaluation: scored`, run `spec.proof evaluate <run>` before the usual checkpoint/audit/critic sequence. It performs the frozen full proof check, trusted build, and benchmark and writes provenance to the leaderboard. Do not manually manufacture proof evidence. `spec.checkpoint snapshot <run>` independently rechecks the candidate and counts one outer iteration. A failed proof is an unscored construction attempt, never a zero benchmark score. When `proof.json` declares `held_out_benchmark`, run `spec.proof evaluate <run> --draw held-out` before passing `--became-best`; that row is the held-out draw and never becomes the score.

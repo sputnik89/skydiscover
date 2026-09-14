@@ -1,0 +1,13 @@
+{
+  "objective": "throughput_ops_per_sec",
+  "direction": "max",
+  "config": {"threads": 1, "key_encoding": "fixed-width zero-padded decimal String", "value_type": "i32", "load_count": 1000000, "run_count": 2000000, "theta": 0.99, "read_fraction": 0.5, "seed": 211, "held_out_seed": 223, "seconds": 30, "repeats": 3, "rust_opt_level": 3},
+  "workload": "Scrambled Zipf theta=0.99 from single-machine-kvstore, keys as fixed-width decimal strings, i32 values; 50:50 get/put; median of three fresh 30-second trials; held-out draw from seed 223",
+  "timeout": 600,
+  "toolchain": ["python3", "evaluator/interface/driver.py", "version"],
+  "build": ["python3", "{interface}/driver.py", "build", "{impl}", "{build}"],
+  "executable": "program",
+  "benchmark": ["python3", "{interface}/driver.py", "benchmark", "{executable}", "scored"],
+  "held_out_benchmark": ["python3", "{interface}/driver.py", "benchmark", "{executable}", "held-out"],
+  "trust_boundary": "The Database trait, empty constructor, and concrete exercise are fully verified in the measured crate. The fixed Rust benchmark, OS timer, runtime validation array, Verus/Rust/Z3/vstd toolchain and compilation are trusted. No persistence or concurrency claim. Candidate source and build inputs are frozen; conditional implementations and source-injection macros are rejected."
+}

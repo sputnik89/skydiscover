@@ -97,6 +97,11 @@ def main(argv=None) -> int:
         help="give up with exit 2 after this many seconds in total (0: no limit); the delivery "
         "hook sets it below its own timeout so a slow check is never mistaken for a pass",
     )
+    ap.add_argument(
+        "--delivery",
+        action="store_true",
+        help="require the scored proof measurement before delivery",
+    )
     args = ap.parse_args(argv)
     if args.check_defects and not args.run:
         ap.error("--check-defects needs --run")
@@ -120,7 +125,25 @@ def main(argv=None) -> int:
         tests, impl = Path(args.suite), Path(args.impl)
         interface = Path(args.interface) if args.interface else None
 
-    rc = run_suite(tests, impl, interface, args.test)
+    if run is not None and run.is_proof_run():
+        from spec import proof
+
+        try:
+            # Neither --test nor an alternate suite can weaken a complete proof check.
+            proof.verify(run.path, impl=impl, build_candidate=False)
+            if args.delivery and run.requires_evaluation():
+                from spec import checkpoint
+
+                if impl.resolve() != run.entry_impl().resolve():
+                    raise ValueError("Delivery must select the measured implementation")
+                checkpoint.score_from_run(run.path)
+            print("TESTS PASSED: complete pinned formal verification.")
+            rc = 0
+        except (ValueError, OSError) as exc:
+            print(f"TESTS FAILED: {exc}", file=sys.stderr)
+            rc = 1
+    else:
+        rc = run_suite(tests, impl, interface, args.test)
     if not rc and run is not None and args.check_defects:
         rc = _defects(run, tests, impl, interface)
     if rc or not args.production_ready:

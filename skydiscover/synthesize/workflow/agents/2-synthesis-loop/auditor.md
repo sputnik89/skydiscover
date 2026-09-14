@@ -267,3 +267,5 @@ claim.
   is the worse failure.
 
 Shared rules for every role: `skydiscover/synthesize/workflow/SKILL.md`, "Rules That Hold Everywhere".
+
+For formal candidates, inspect the pinned contract/checker, permitted assumptions, non-vacuity obligations, and proof-to-executable build boundary. Protect original formal tests; additional integration probes may supplement them. Check actual worker isolation, including out-of-process tool servers. A prompt instruction or chmod is not an enforced write boundary.

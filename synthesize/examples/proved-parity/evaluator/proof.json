@@ -1,0 +1,12 @@
+{
+  "objective": "latency_ns",
+  "direction": "min",
+  "config": {"requests": 2000, "rust_opt_level": 0},
+  "workload": "2000 inputs: 10000 + i % 512",
+  "timeout": 120,
+  "toolchain": ["python3", "evaluator/interface/driver.py", "version"],
+  "build": ["python3", "{interface}/driver.py", "build", "{impl}", "{build}"],
+  "executable": "program",
+  "benchmark": ["{executable}", "2000"],
+  "trust_boundary": "Verus proves the pure parity function for all u64 values; pinned Verus/Rust compiles that function. The fixed std::time benchmark driver and compiler are trusted and outside the theorem."
+}

@@ -18,3 +18,17 @@ The plugin manifests, `../.claude-plugin/plugin.json` and `../.codex-plugin/plug
 this directory because Claude Code and Codex require them at the plugin root — the directory that
 holds the components the plugin ships, namely `workflow/`. Paths inside a manifest are relative to
 that root and cannot leave it. The manifests point at the files in this directory.
+
+## Formal worker isolation
+
+Native role wiring does not restrict candidate writes. For scored or proof-only formal work,
+launch the complete DSA/ISA process through `spec.proof worker` or provide equivalent external
+isolation with a separately controlled evaluator. Keep the original contract digest in that
+evaluator's environment. Remote tool servers must obey the same write boundary. The default
+proof checker/build/benchmark runner uses sandbox-exec on macOS or bwrap on Linux and fails if
+it cannot establish isolation. Explicit `--isolation external` records operator-provided
+isolation; it is never an automatic fallback. See [proof evaluation](../../PROOF_EVALUATION.md).
+
+Structured DSA/ISA SubagentStop events return partial progress without triggering final delivery.
+Final delivery still requires complete proof verification and, for scored tasks, its measurement.
+On adapters without role metadata, keep inner proof tasks separate from final delivery tasks.

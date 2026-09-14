@@ -21,8 +21,9 @@ measurements together, attribute them to design choices, and say what to do next
 
 - The current implementation, the specification cards, and the benchmark objective.
 - The latest profile and the leaderboard (`<run>/synthesis/bench/`, the decision log). On the proof
-  path there is neither: read `synthesis/proof-log.md` and the proof check instead, and judge the
-  quality contract, not a bottleneck.
+  path also read `synthesis/proof-log.md` and the proof check. Scored proof runs use performance
+  evidence and the quality contract together; proof-only runs judge the quality contract without
+  inventing a bottleneck.
 - `synthesis/plan.md`: the candidates, the current brief, and the ruled-out designs. The planner
   (`planner.md`, next to this brief) owns its structure; you append to it each iteration.
 

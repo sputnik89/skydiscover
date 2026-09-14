@@ -20,6 +20,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import tempfile
 
 import pytest
 
@@ -172,7 +173,23 @@ def test_settings_writer_backs_up_an_unparseable_file(tmp_path):
 def _gate(payload, env=None):
     clean = {k: v for k, v in os.environ.items() if not k.startswith("SKYDISCOVER_")}
     clean.update(env or {})
-    return _run(["bash", str(_HOOK)], input=payload, env=clean)
+    clean.pop("CLAUDE_PROJECT_DIR", None)
+    # A developer may have active runs in the checkout. Unit checks must never discover them.
+    with tempfile.TemporaryDirectory() as cwd:
+        return _run(["bash", str(_HOOK)], input=payload, env=clean, cwd=cwd)
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="needs structured role parsing")
+def test_dsa_inner_return_is_not_final_delivery(tmp_path):
+    env = {"SKYDISCOVER_RUN": str(tmp_path / "unfinished")}
+    payload = {
+        "hook_event_name": "SubagentStop",
+        "agent_type": "dsa",
+        "last_assistant_message": "Partial lemma checked; next obligation remains.",
+    }
+    assert _gate(json.dumps(payload), env).returncode == 0
+    payload["last_assistant_message"] = "Final deliverables are ready"
+    assert _gate(json.dumps(payload), env).returncode == 2
 
 
 def test_gate_ignores_an_ordinary_task():

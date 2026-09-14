@@ -44,6 +44,18 @@ else
   title="$payload"
 fi
 title="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]')"
+# A structured DSA/ISA SubagentStop is an inner construction return, not delivery.
+# Final task completion and run finish still perform full verification independently.
+if [ "$event" = "SubagentStop" ] && command -v jq >/dev/null 2>&1; then
+  role="$(printf '%s' "$payload" | jq -r '.agent_type // ""' 2>/dev/null)" || role=""
+  case "$role" in
+    dsa|isa)
+      case "$title" in
+        *final*deliverable*|*deliver*candidate*|*deliver*artifact*) ;;
+        *) exit 0 ;;
+      esac ;;
+  esac
+fi
 # A delivery verb (deliver/ship/finaliz/submit) near a domain-neutral artifact noun, or the
 # skill's own Phase 3 task title ("Phase 3: Final Deliverables").
 case "$title" in
@@ -86,7 +98,7 @@ fi
 
 # Stay under the hook's own timeout (3600 s as installed): a hook the harness kills is not a
 # block, so the check must give up first, with exit 2.
-args=(--run "$SKYDISCOVER_RUN" --wall-secs "${SKYDISCOVER_DELIVERY_SECS:-3500}")
+args=(--run "$SKYDISCOVER_RUN" --delivery --wall-secs "${SKYDISCOVER_DELIVERY_SECS:-3500}")
 [ -n "${SKYDISCOVER_PRODREADY:-}" ] && args+=(--production-ready)
 [ -n "${SKYDISCOVER_IMPL:-}" ] && args+=(--impl "$SKYDISCOVER_IMPL")
 # run_tests.py lives beside this hook (workflow/scripts/) and finds everything else from its own

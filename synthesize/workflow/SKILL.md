@@ -117,7 +117,7 @@ Read the task's front matter before anything else.
 
 | `task.md` front matter has | Path | Correctness is |
 |---|---|---|
-| `checked_by: proof` | **formal-proof-driven** (Inductive Deductive Synthesis, last section) | proved against an immutable spec |
+| `checked_by: proof` | **formal-proof-driven** candidate construction (last section); scored when `evaluation: scored` | proved against an immutable spec |
 | anything else | **test-driven** (Phases 1 to 3) | checked by tests |
 
 The front matter also carries `domain: <name>`, which every helper reads (`run finish` saves into
@@ -247,7 +247,8 @@ Run a fresh agent for each step; every brief is in `agents/2-synthesis-loop/`:
    the loop and again whenever the critic calls for a design decision; a parameter sweep inside the
    current design does not need it.
 2. **Coding Agent** (`coding-agent.md`): makes one well-scoped, tested change, runs the fast tests, records the
-   outcome, and exits.
+   outcome, and exits. For `checked_by: proof`, this stage is multiple DSA/ISA cycles until the
+   complete candidate verifies; follow the formal section below for construction and budgets.
 3. **Evaluator** (`evaluator.md`, **performance mode**): runs the scored benchmark on a
    test-passing candidate at the declared configuration, appends the leaderboard, names the
    measured bottleneck (or the scored cases lost, when the score is not a rate), and writes the
@@ -350,56 +351,69 @@ Tell the user one path: the result.
 
 ## Formal-Proof-Driven Synthesis (`checked_by: proof`)
 
-Correctness is proved, not tested. The machine-checked proof against an **immutable spec** is the
-test: the task ships it as its test suite (an `evaluator/tests/test.sh` whose one test builds the
-proof and checks it), so no mutant is needed. The lead's sequencing, the plan, the decision log,
-the critic, and `run finish` are reused. Discovery, the workload, and every measurement step are
-replaced by step 1 below: a proof has no benchmark.
+Proof is the correctness mode inside the shared synthesis loop. `evaluation: scored` in
+`task.md` enables the outer benchmark loop; omitted `evaluation` on existing proof tasks (or
+explicit `evaluation: proof-only`) means verification-only completion. A missing benchmark on
+a declared scored task is an error, never a reason to fall back to proof-only mode.
 
-The loop is **Inductive Deductive Synthesis (IDS)**. A **DSA** (Deductive Synthesis Agent,
-`agents/2-synthesis-loop/dsa.md`) co-designs implementation and proof in tested steps; an **ISA**
-(Inductive Synthesis Agent, `agents/2-synthesis-loop/isa.md`) proposes a new design when the DSA
-stalls. The lead runs that loop and never does its work: it does not write the proof; derive the
-implementation, the simulation relation, or the crux lemma; or design the fix on a stall. A passing
-proof reached without the DSA/ISA loop running is a fidelity failure, not a success.
+The lead runs **Inductive Deductive Synthesis (IDS)** inside candidate construction. The DSA
+(`agents/2-synthesis-loop/dsa.md`) derives implementation and proof together; the ISA
+(`agents/2-synthesis-loop/isa.md`) redesigns on a stall. The lead must not write the implementation,
+simulation relation, crux lemma, or stall fix on their behalf.
 
-1. **Spec.** Create the run directory (`spec.paths run <slug>`) and write `task.md` with
-   `checked_by: proof` and `domain:` in its front matter. The task names the immutable spec
-   (interface or module type, the proof obligation, the pinned theorem): copy it to
-   `synthesis/evaluator/interface/` and the task's `evaluator/tests/` (its `test.sh` and the proof check) to
-   `synthesis/tests/`. If no spec exists, draft one and have the user confirm it; if the task ships
-   no proof check, write one as `synthesis/tests/proof.<ext>` the way
-   `skydiscover/synthesize/examples/README.md` ("A formal domain") describes. Never edit the spec.
-2. **Export the test.** `export SKYDISCOVER_RUN=<run dir>`. `run_tests.py --run <run>` runs the
-   suite against `synthesis/impl/`, where the agent writes the code and its proof. This is the only
-   environment the formal path needs.
-3. **Seed the plan.** Run the planner (`planner.md`) once with the spec: `## Candidates` are
-   representation hypotheses (what the implementation keeps, and the simulation relation or
-   invariant each would carry), `## Brief` is the first direction, and `## Workload` holds what
-   the spec's guard and history make hard. On a stall the ISA rewrites `## Brief`; the planner is
-   not re-run.
-4. **Run the DSA** (`dsa.md`, exactly as written). Never write the proof inline and never run a generic
-   "prove this theorem" worker in its place: a generic worker skips the tested cycle, the design
-   log, and the ISA handoff. The DSA advances one tested step of implementation plus proof per
-   cycle, type-checks it, rewinds on a dead end, and appends every attempt to
-   `synthesis/proof-log.md`. If `proof-log.md` does not exist, the IDS loop did not run. Your brief gives a direction only
-   (a representation hypothesis and the quality target, e.g. "summarize the unbounded history with a
-   bounded counter"); deriving the concrete implementation, the relation `R`, and the crux lemma is
-   the DSA's co-design job. Handing it a finished design to mechanize is a violation.
-5. **Run the ISA on a stall.** After three failed DSA cycles on the same obligation (whether the
-   blocker is in the code or the proof), run `isa.md` for a new design seeded by the failure log,
-   then hand its plan to a fresh DSA. Do not design the fix yourself.
-6. **Quality veto.** If the task carries an efficiency or quality contract (`obligation:` in
-   `task.md`), run the critic (`agents/2-synthesis-loop/critic.md`) to judge it. A proof that
-   type-checks but only restates the spec (an unbounded history merely re-indexed; a side left
-   identical to the spec) is rejected and the loop continues. A passing checker is necessary, not
-   sufficient.
-7. **Deliver.** Delivery passes only when `run_tests.py --run <run>` exits 0: the proof builds
-   from clean, uses no escape hatches, proves the target theorems soundly, and builds the
-   non-vacuity example. Write `report.md` (the theorem proved, the spec it refines, the
-   assumptions, the result) and run `run finish <run> --export-to .`; it needs no score for a
-   proof run. Run a final Auditor pass and `stamp-audit` first; proof-driven working files are
-   kept. A proof alone does not close a separately recorded defect.
+1. **Set the contract and objective.** Copy the given immutable formal spec and pinned target
+   theorems to `synthesis/evaluator/interface/`, and the supplied complete checker to
+   `synthesis/tests/`. If no spec is supplied, draft it and obtain the user's confirmation before
+   freezing it. The checker must reject escape hatches, undeclared assumptions, weakened target
+   theorems, and vacuous implementations. For scored tasks, retain workload/environment cards
+   and provide `synthesis/evaluator/proof.json`: objective, direction, config, workload, executable,
+   build/benchmark/toolchain argv, timeout, and the proof-to-executable trust boundary. See
+   `skydiscover/synthesize/PROOF_EVALUATION.md` for the schema and a runnable example.
+2. **Freeze before dispatch.** The trusted lead runs `spec.proof freeze <run> --trust-root <external-dir>`
+   once. Retain the printed `SKYDISCOVER_PROOF_TRUST` and `SKYDISCOVER_PROOF_CONTRACT` values outside
+   worker control and pass them to the evaluator and delivery process. Never recompute the expected
+   digest from worker files on resume. Launch the entire candidate worker through `spec.proof worker`
+   or equivalent enforced isolation; exposing writable host tools would defeat it. Native adapters
+   alone are not a sandbox. External isolation requires an explicit freeze-time declaration; never
+   silently fall back when a sandbox is unavailable. A user-authorized contract change starts a new
+   run and invalidates old verification/measurement evidence.
+3. **Budget and plan.** Record both scored iterations and total DSA cycles, plus any construction
+   time limit: `spec.loop init <run> --iterations N --cycles M --wall-secs S`. The budget record persists
+   across resume and ISA redesigns. Run the planner (`planner.md`) initially and for performance
+   design decisions. The outer brief gives a direction, never a finished design to mechanize.
+4. **Construct one candidate.** Run `spec.loop begin <run>`, then reserve `spec.loop cycle <run>`
+   before each fresh DSA invocation. Each cycle advances one bounded implementation/proof substep;
+   partial checks do not qualify a candidate for scoring. Bound each worker with a timeout. The DSA
+   returns its attempt/cycle ID, checker outcome, and dead ends; the lead appends these to
+   `synthesis/proof-log.md`. For each rejected step the DSA also returns its diff and first checker
+   error; the lead writes it to `synthesis/proof-moves/<attempt>-<cycle>-<n>.diff` and names that file
+   in the log entry. After three failed cycles on the same obligation, run ISA. The lead
+   records its inner strategy in `synthesis/proof-strategy.md`; ISA does not overwrite the planner's
+   outer brief. It never resets counters. On exhaustion or abandonment, run
+   `spec.loop fail <run> --reason "remaining obligation"`; keep code and proof recovery files.
+   Then run the planner before the next attempt, so it records the proof dead end under
+   `## Learnings` and picks a direction the proof log has not already ruled out.
+5. **Evaluate the complete candidate.** For a scored task, the evaluator (`evaluator.md`) runs
+   `spec.proof evaluate <run>`. It checks the frozen contract, performs full verification on a clean
+   copy, builds the declared executable, and measures it. It appends an input-bound score and proof
+   provenance. Then run `spec.checkpoint snapshot <run> [--became-best]`: only a fully verified,
+   measured candidate counts as a scored iteration, including a regression or tie. Inner DSA cycles
+   and failed candidates never become scored checkpoints. Benchmark inputs and build toolchain are
+   pinned; if the executable cannot be reproduced, re-evaluation is required.
+6. **Audit and feedback.** Apply the shared audit decision rules and run the critic (`critic.md`)
+   after every scored iteration. The critic combines profiles, scores, proof history, and any
+   `obligation:` quality veto to guide the next improvement. A completed proof alone does not end
+   a scored run. Proof-only runs instead use `spec.proof verify <run>` and the quality veto, then
+   proceed to final audit and delivery.
+7. **Stop and deliver.** Stop starting work at either budget. An already-reserved candidate may
+   finish verification, its bounded benchmark, and checkpoint; no new cycle starts past the limit.
+   Persist `k/N` scores, total DSA cycles, failures, stop reason, and remaining obligations in the
+   report. Preserve the best verified candidate and unfinished progress separately. If a different
+   best is selected, `spec.checkpoint restore-best <run>` preserves current code/proof progress before
+   restoring the best source and build; re-audit the restored candidate. Run full verification,
+   final Auditor and `stamp-audit`, then `run finish <run> --export-to .`. Scored proof runs require
+   a matching score; proof-only runs do not. No verified candidate means report incomplete, retain
+   progress, and do not claim delivery. Proof files and budget records remain available for replay.
 
 ## Roles
 

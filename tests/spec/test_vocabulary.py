@@ -13,6 +13,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 SYNTH = REPO / "skydiscover" / "synthesize"
 
+# The literal Verus --no-cheating switch is a tool API, not pipeline vocabulary.
 # Retired word -> the pinned name. Each is a regex over the text, case-insensitive.
 RETIRED = {
     r"\bdiscoverer\b": "spec-builder (discovery mode)",
@@ -37,7 +38,7 @@ RETIRED = {
     r"\(#\d+\)": "no PR or issue numbers in shipped text",
     r"\bKernelWiki\b|\bKDA\b": "no references to other projects",
     r"(?<!final )\bdeliverables?\b": "the result (Final Deliverables is the figure's phase name)",
-    r"\bloopholes?\b|\bcheat\w*": "reward hack",
+    r"\bloopholes?\b|(?<!--no-)\bcheat\w*": "reward hack",
     r"\bthe engine\b|\bskydiscover engine\b": "the skydiscover package",
     r"\bworkspace\b": "run directory / working files",
     r"<ts>|YYYYMMDD": "<timestamp>",
@@ -66,7 +67,7 @@ def _files():
 _PIPELINE_ONLY = (
     r"\bgates?\b",
     r"\bcertif\w*",
-    r"\bloopholes?\b|\bcheat\w*",
+    r"\bloopholes?\b|(?<!--no-)\bcheat\w*",
     r"\bfindings\.json\b",
     r"(?<!final )\bdeliverables?\b",
     r"\brulings?\b",

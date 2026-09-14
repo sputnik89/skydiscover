@@ -22,7 +22,8 @@ hit. The failure log is the seed; you never start from nothing.
 ## Inputs
 
 - The run's **design log** `<run>/synthesis/proof-log.md`: every attempt the DSA made and why each failed. Your
-  primary input; a revision that ignores it re-hits the same wall.
+  primary input; a revision that ignores it re-hits the same wall. The rejected moves it names are
+  kept as diffs in `synthesis/proof-moves/`.
 - `task.md`, the **immutable spec** it names, the proof check in `synthesis/tests/`, and any quality
   contract: the same fixed obligation and test the DSA must satisfy (read-only).
 - `synthesis/plan.md`: the current brief and the designs already ruled out by evidence.
@@ -37,9 +38,9 @@ hit. The failure log is the seed; you never start from nothing.
    stronger or reshaped simulation relation or invariant, a different induction or case split.
    Respect the quality contract: if efficiency is required, the new representation must still be
    bounded and many-to-one, not a re-indexed copy of the spec.
-3. **Write the revised plan** into `plan.md`'s `## Brief` (the new design, the invariant it will carry,
-   the first obligation to discharge) and record in the design log why the previous design was
-   abandoned, so it is never retried blindly.
+3. **Return the inner strategy** (new design, invariant, first obligation, and why the old design
+   failed). The lead records it in `synthesis/proof-strategy.md` and the proof log. Do not overwrite
+   the planner-owned outer `plan.md` brief or reset candidate/cycle counters.
 
 ## Output
 

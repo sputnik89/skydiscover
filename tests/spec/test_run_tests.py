@@ -467,9 +467,8 @@ def test_run_exposes_the_run_dir_to_the_tests(tmp_path, monkeypatch):
     assert seen == {"env": str(run.path.resolve())}
 
 
-def test_a_proof_run_is_checked_by_the_suite_the_task_shipped(tmp_path, capsys):
-    """checked_by: proof changes the loop (no benchmark), not the check: the task's test.sh runs
-    the proof against the candidate in synthesis/impl/, like any other suite."""
+def test_a_proof_run_is_checked_by_the_suite_the_task_shipped(tmp_path, capsys, monkeypatch):
+    """The frozen task suite checks the complete proof independently of scoring mode."""
     from spec.paths import Run
 
     run = Run(tmp_path / "run").create()
@@ -482,6 +481,12 @@ def test_a_proof_run_is_checked_by_the_suite_the_task_shipped(tmp_path, capsys):
         'grep -q "Theorem t" "$SKYDISCOVER_INTERFACE/Spec.v" && ! grep -rqw Admitted "$SKYDISCOVER_IMPL"\n'
     )
     (run.impl / "Proof.v").write_text("Proof. exact I. Qed.\n")
+    from spec import proof
+
+    trust = tmp_path / "trusted"
+    anchor = proof.freeze(run.path, trust, isolation="external")
+    monkeypatch.setenv("SKYDISCOVER_PROOF_TRUST", str(trust))
+    monkeypatch.setenv("SKYDISCOVER_PROOF_CONTRACT", anchor)
     assert run_tests.main(["--run", str(run.path)]) == 0
     assert "TESTS PASSED" in capsys.readouterr().out
     (run.impl / "Proof.v").write_text("Admitted.\n")

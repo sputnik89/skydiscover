@@ -120,6 +120,8 @@ def input_digests(run_dir: Path, *, audit=False) -> dict:
     }
     if audit:
         inputs["decisions"] = _tree_digest(run.decision_log)
+    if run.is_proof_run() and run.requires_evaluation():
+        inputs["executable"] = _tree_digest(run.synthesis / "verified-build")
     return inputs
 
 
@@ -419,6 +421,11 @@ def score_from_run(run_dir: Path) -> dict[str, Any]:
     run = Run(run_dir)
     doc: dict[str, Any] = {"checkpoint": None, "created_at": _utc_now(), "score": {}}
     if run.is_proof_run():
+        from . import proof
+
+        proof.trusted(run)
+    if not run.requires_evaluation():
+        doc["proof"] = proof.verify(run_dir, build_candidate=False)
         return doc
     board = _read_json(run.leaderboard, [])
     inputs = input_digests(run_dir)
@@ -429,6 +436,19 @@ def score_from_run(run_dir: Path) -> dict[str, Any]:
         )
     if not isinstance(row.get("config"), dict):
         raise ValueError("Record the benchmark configuration as an object, even when empty.")
+    if run.is_proof_run():
+        from . import proof
+
+        cfg = proof.config(run)
+        if any(row.get(key) != cfg[key] for key in ("objective", "direction", "config")):
+            raise ValueError("The measurement differs from the pinned proof benchmark contract")
+        evidence = proof.verify(run_dir)
+        if row.get("proof") != evidence or inputs != input_digests(run_dir):
+            raise ValueError(
+                "Proof or executable does not match the measured candidate; evaluate again"
+            )
+        doc["proof"] = evidence
+        doc["attempt"] = row.get("attempt")
     if row.get("direction", "max") not in ("min", "max"):
         raise ValueError("Score direction must be 'min' or 'max'.")
     metrics = row.get("metrics")
@@ -544,8 +564,17 @@ def write_checkpoint(
                     "inputs": inputs,
                     "config": measured.get("config"),
                     "direction": measured.get("direction", "max"),
+                    **(
+                        {"proof": score.get("proof"), "attempt": score.get("attempt")}
+                        if run.is_proof_run()
+                        else {}
+                    ),
                 },
             )
+            if run.is_proof_run() and run.requires_evaluation():
+                shutil.copytree(run.synthesis / "verified-build", private / "build")
+                if _tree_digest(private / "build") != (inputs or {}).get("executable"):
+                    raise ValueError("Executable changed while checkpointing")
             shutil.copytree(run.impl, private / "source", ignore=_copy_ignore)
             if _tree_digest(private / "source") != input_digests(run_dir)["implementation"]:
                 differing = _copy_mismatch(run.impl, private / "source")
@@ -705,15 +734,26 @@ def snapshot_run(
     export_root: Path,
     *,
     became_best: bool = False,
-    require_evaluation: bool = True,
+    require_evaluation: Optional[bool] = None,
 ) -> tuple[Path, Path]:
     """Checkpoint the current candidate; refuse one with no score unless told otherwise."""
     run = Run(run_dir)
     if not run.impl.is_dir():
         raise FileNotFoundError(f"no generated artifact at {run.impl}")
+    if run.is_proof_run():
+        from . import proof
+
+        proof.trusted(run)
+    attempt = None
+    if run.is_proof_run() and run.requires_evaluation():
+        from . import loop
+
+        attempt = loop.pending(run_dir)
     inputs = input_digests(run_dir)
     score = score_from_run(run_dir)
-    if require_evaluation and not score["score"]:
+    if attempt is not None and score.get("attempt") != attempt:
+        raise ValueError("Measurement belongs to another candidate attempt")
+    if (run.requires_evaluation() or require_evaluation) and not score["score"]:
         raise ValueError(
             f"refusing to checkpoint an unevaluated artifact: {run.leaderboard} "
             "has no entry with metrics for this candidate. A checkpoint is one evaluated iteration; "
@@ -748,9 +788,50 @@ def snapshot_run(
         run_dir=run_dir,
         inputs=inputs,
     )
+    if attempt is not None:
+        loop.complete(run_dir, checkpoint, attempt)
     if became_best:
         publish_best(output_dir, checkpoint, run_dir)
     return output_dir, checkpoint
+
+
+def restore_best(run_dir: Path) -> Path:
+    """Preserve unfinished code/proof bytes before restoring an already measured best."""
+    run = Run(run_dir)
+    out = published_output(run_dir)
+    selected = selected_best_checkpoint(out) if out else None
+    if selected is None:
+        raise ValueError(
+            "No selected verified checkpoint to restore; keep progress and report incomplete"
+        )
+    record = read_record(selected)
+    if any(
+        record.get("inputs", {}).get(k) != input_digests(run_dir).get(k) for k in _BENCHMARK_INPUTS
+    ):
+        raise ValueError("The best belongs to a different contract or benchmark")
+    source = selected / ".verification/source"
+    if _tree_digest(source) != record["inputs"]["implementation"]:
+        raise ValueError("The selected checkpoint source changed")
+    if run.is_proof_run():
+        from . import proof
+
+        proof.verify(run_dir, impl=source, build_candidate=False)
+    build = selected / ".verification/build"
+    if build.is_dir() and _tree_digest(build) != record["inputs"].get("executable"):
+        raise ValueError("The selected executable changed")
+    recovery = run.synthesis / "recovery"
+    recovery.mkdir(exist_ok=True)
+    saved = Path(tempfile.mkdtemp(prefix="unfinished-", dir=recovery))
+    # All writes are inside the run; the unfinished tree is moved, never discarded.
+    if run.impl.exists():
+        os.replace(run.impl, saved / "impl")
+    shutil.copytree(source, run.impl)
+    if build.is_dir():
+        destination = run.synthesis / "verified-build"
+        if destination.exists():
+            os.replace(destination, saved / "build")
+        shutil.copytree(build, destination)
+    return saved
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -761,6 +842,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     sub = ap.add_subparsers(dest="command", required=True)
     inputs = sub.add_parser("inputs", help="capture inputs before a benchmark run")
     inputs.add_argument("run_dir")
+    restore = sub.add_parser(
+        "restore-best", help="preserve unfinished work and restore the selected checkpoint"
+    )
+    restore.add_argument("run_dir")
     snap = sub.add_parser(
         "snapshot", help="write checkpoint_<n>/ and, with --became-best, refresh best/"
     )
@@ -790,6 +875,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "inputs":
         print(json.dumps(input_digests(Path(args.run_dir)), indent=2))
+        return 0
+    if args.command == "restore-best":
+        print(restore_best(Path(args.run_dir)))
         return 0
     if args.command == "stamp-audit":
         print(stamp_audit(Path(args.run_dir), args.finding))

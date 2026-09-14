@@ -243,8 +243,31 @@ class Run:
         return domain_slug(raw) if raw else None
 
     def is_proof_run(self) -> bool:
-        """A formal-proof-driven run: no benchmark; the task ships the proof check as its test suite."""
+        """Correctness is established by the task's full formal proof check."""
+        # A trusted evaluator invocation cannot be downgraded by editing checked_by locally.
+        # The proof module validates the externally retained digest before accepting anything.
+        if os.environ.get("SKYDISCOVER_PROOF_TRUST") or os.environ.get(
+            "SKYDISCOVER_PROOF_CONTRACT"
+        ):
+            return True
         return front_matter(self.task).get("checked_by") == "proof"
+
+    def requires_evaluation(self) -> bool:
+        """Scoring is independent of correctness; legacy proof tasks remain proof-only."""
+        mode = front_matter(self.task).get("evaluation")
+        if mode not in (None, "scored", "proof-only"):
+            raise ValueError("evaluation must be scored or proof-only")
+        if mode == "proof-only" and not self.is_proof_run():
+            raise ValueError("evaluation: proof-only requires checked_by: proof")
+        return mode == "scored" or not self.is_proof_run()
+
+    @property
+    def loop_state(self) -> Path:
+        return self.synthesis / "loop.json"
+
+    @property
+    def proof_config(self) -> Path:
+        return self.evaluator / "proof.json"
 
     # Phase 1: specification/
     @property

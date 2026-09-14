@@ -78,10 +78,12 @@ the run has a trace, and when the benchmark scores a rate, a latency, or a cost.
 
 | Path | Owner | Purpose |
 |---|---|---|
-| `plan.md` | planner (critic appends to `## Learnings`; on the proof path the ISA rewrites `## Brief`) | the candidate designs, the ones ruled out with the numbers that killed them, and the current brief: the one next change |
-| `proof-log.md` | dsa, isa | formal-proof-driven runs only: every proof attempt and why it failed |
+| `plan.md` | planner (critic appends to `## Learnings`) | the candidate designs, the ones ruled out with the numbers that killed them, and the current brief: the one next change |
+| `proof-log.md` | lead, from dsa/isa reports | formal-proof-driven runs only: every proof attempt and why it failed |
+| `proof-moves/` | lead, from dsa reports | formal-proof-driven runs only: each rejected implementation/proof step as a diff with its first checker error, named from `proof-log.md`; read by planner and isa |
+| `proof-strategy.md`, `loop.json` | lead | inner ISA strategy and persistent candidate/DSA budgets; separate from scored checkpoints |
 | `impl/` | coding-agent (or dsa) | the current candidate: one source file, or a modular codebase built whole (a Python one holds `__init__.py`); `SKYDISCOVER_IMPL` names one file when several candidates sit here |
-| `evaluator/interface/` | first coding agent | the public contract the candidate implements and the tests compile against |
+| `evaluator/interface/` | first coding agent for tests; trusted lead for proof | the public contract the candidate implements and the tests compile against |
 | `evaluator/benchmark/` | first coding agent | the scored benchmark harness |
 | `evaluator/reference/`, `evaluator/mutants/` | evaluator (correctness mode) | the trusted reference every test must pass, the broken variants every test must catch |
 | `tests/` | evaluator (correctness mode), auditor | the suite: one file per kept test, any language, and `test.sh`, which builds and runs them against `$SKYDISCOVER_IMPL` (`bash test.sh [file...]`, exit 0 when every test passes) |

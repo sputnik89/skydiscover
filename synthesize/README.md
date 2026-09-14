@@ -50,6 +50,11 @@ answers, are kept in `~/.skydiscover/<domain>/` for the next run.
 | [Test-driven](https://arxiv.org/abs/2605.24096) | You have a plain-text description | Tests that grow with the implementation; the Auditor adds one for every reward hack it finds |
 | [Formal-proof-driven](https://arxiv.org/abs/2605.23109) | You have a formal spec (e.g. Rocq) | A machine-checked proof, built step by step with the code ([Inductive Deductive Synthesis](https://arxiv.org/abs/2605.23109)) |
 
+Proof tasks can join the same scored loop with `evaluation: scored`. DSA/ISA constructs a fully
+verified candidate before benchmarking; separate cycle and iteration budgets bound the work.
+See [proof evaluation and protected contracts](PROOF_EVALUATION.md) and the
+[scored Verus example](examples/proved-parity/README.md). Existing proof-only tasks need no benchmark.
+
 The result comes with `spec.md`: the properties it satisfies, what was measured, and how each checkpoint fared.
 
 ## 🤖 Supported Coding Agents

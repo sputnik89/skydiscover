@@ -1,99 +1,171 @@
-# Verus-verified database
+# Verus database: verified throughput optimization
 
-Generate an in-memory Rust database with machine-checked lookup, insert/overwrite,
-inclusive range scan, and sorted enumeration. Requires Python 3, Bash, and Verus
-with its matching Rust toolchain and Z3. There is no benchmark in this proof task.
+This example uses the shared scored proof loop: construct code/proofs, verify the
+full original Database contract, benchmark the verified executable, checkpoint,
+and use feedback for the next candidate. No shared loop changes are needed.
 
-## Run it
+The immutable trait is in `evaluator/mod.rs` (SHA-256
+`b22f651ce5002f6f5fb733ccde9cc0b433ae2f5555d33571f5ddc5f7652b0d92`).
+Candidates implement `Database` (`String` keys, `i32` values, viewed as
+`Map<Seq<char>, i32>`) as `VerifiedDb`, with a public empty constructor. The
+contract covers get, put, inclusive scan, and sorted enumeration; keys are ordered
+lexicographically by character code (`key_lt`), and scan results are strictly
+ascending. The concrete exercise uses one-character keys, with explicit proof
+steps for map membership, distinct keys, and the empty range.
 
-With `fcc-server` already running and configured in another terminal:
+## Prepare and run N iterations
 
-```bash
-bash synthesize/examples/verus-db/run_fcc.sh
-```
+Requires Python with NumPy, Verus with its matching Rust toolchain available through
+rustup, and Z3. Native isolation requires macOS sandbox-exec or Linux bwrap.
+VERUS and VERUS_Z3_PATH are honored; otherwise the setup resolves Verus from PATH
+and looks for Z3 beside its resolved executable. Setup pins the actual executable,
+Verus libraries, solver, Rust compiler/libraries, and Python interpreter hashes.
 
-The launcher discovers Verus and Z3 (including the local `~/verus/verus` and
-`~/verdex/.venv/bin/z3` paths), installs the Claude skill, agent roles, and hooks
-using SkySynth's installer, then opens `fcc-claude` with the task prompt. It uses
-normal interactive permission prompts. The synthesis loop runs inside that
-session; the launcher does not automatically restart it after exit.
+From the repository root:
 
-```bash
-# Check prerequisites and inspect the command without changing project settings:
-bash synthesize/examples/verus-db/run_fcc.sh --dry-run
-
-# Resume a particular run from its saved files:
-bash synthesize/examples/verus-db/run_fcc.sh --resume-run .skydiscover/<slug>
-```
-
-Set `VERUS` and `VERUS_Z3_PATH` to override discovery. Additional Claude options
-can be passed after `--`. FCC performs its own server-connectivity check at launch.
-
-For manual setup:
-
-Install Verus following the [official setup guide](https://verus-lang.github.io/verus/guide/getting_started.html).
-The checker was exercised with Verus `0.2026.09.06.8dea4a2`. It uses the unchanged
-spec's `final(self)` syntax; older releases may not support it.
-
-Make `verus` available on PATH, or export its absolute executable path before
-launching the coding agent. Set `VERUS_Z3_PATH` if your installation needs it:
-
-```bash
+```sh
 export VERUS=/absolute/path/to/verus
 export VERUS_Z3_PATH=/absolute/path/to/z3
+python3 synthesize/examples/verus-db/prepare.py \
+  --run .skydiscover/verus-db-throughput \
+  --trust-root outputs/verus-db-throughput-controller/contract \
+  --seed-from .skydiscover/verus-db/synthesis/impl \
+  --iterations 10 --cycles 100
 ```
 
-Wire SkySynth using `uv run skydiscover init`, restart the coding agent, and invoke
-from this directory's repository root:
+Use fresh run and trust paths. This preserves the old proof-only run and copies its
+candidate as an unverified seed. To start without a seed, omit --seed-from. The
+supplied `candidates/baseline.rs` is a fully verified append-only implementation for
+integration validation; it keeps an insertion-order log (the last write to a key
+wins), sorts by inserting each key's last write into a sorted vector, and scans by
+filtering that sorted result. Its scan/sort algorithm is quadratic;
+it is a starting point for optimization, not an efficient production database.
 
-```text
-/skysynth build and prove the database specified in synthesize/examples/verus-db/task.md
+Or prepare and run the whole loop from one bash script, which owns the loop control
+itself (budget checks between lead sessions, a per-session watchdog, finalization, and
+`run finish --export-to`) and calls only the framework's commands and the trace generator:
+
+```sh
+bash skydiscover/synthesize/examples/verus-db/run_loop.sh 10 \
+  --run .skydiscover/verus-db-throughput \
+  --trust-root outputs/verus-db-throughput-contract \
+  --verus /absolute/path/to/verus --z3 /absolute/path/to/z3
 ```
 
-The result is exported to `outputs/synthesize/<slug>_<timestamp>/best/`.
-Replay a candidate (substitute its actual directory):
+It prepares a fresh run on first launch (same staged files, pinned toolchain, two frozen
+draws, and workload card as `prepare.py`) and resumes from `<trust-root>.controller.json`
+afterwards; rerun it with the same N and budgets. `--dry-run` and `--prepare-only` stop
+before any agent session. Needs `jq`, `rustup`, and a Python with NumPy and skydiscover.
 
-```bash
+Launch or resume the trusted lead using the external controller record:
+
+```sh
+bash synthesize/examples/verus-db/run_claude.sh \
+  --run .skydiscover/verus-db-throughput \
+  --trust-root outputs/verus-db-throughput-controller/contract \
+  --iterations 10
+```
+
+`run_fcc.sh` accepts the same arguments and uses fcc-claude; its server must already
+be configured and running.
+
+`run_codex.sh` accepts the same arguments and runs each lead session with `codex exec`.
+Before launching it checks that `skydiscover init --agent codex` wired the project holding
+the run (`.codex/agents/`, `.codex/hooks.json`, `.agents/skills/skysynth`) and that Codex
+trusts that project; otherwise Codex silently uses generic agents instead of the roles.
+Two Codex-only flags:
+
+- `--codex-sandbox workspace-write|off` (default `workspace-write`). On macOS, Codex's
+  sandbox forbids the nested `sandbox-exec` that `proof evaluate` needs under the default
+  `sandbox` isolation, so the controller refuses that combination: pass `--codex-sandbox off`
+  (Codex's `--dangerously-bypass-approvals-and-sandbox`; candidate code still runs inside the
+  proof runner's own sandbox), or freeze the contract with `--isolation external`.
+- `--codex-bypass-hook-trust` passes `--dangerously-bypass-hook-trust`. Without it, trust the
+  hooks once with `/hooks` in an interactive Codex session, or the delivery check never runs.
+
+All three wrappers also support preparing a fresh run with
+--seed-from, --prepare-only, --dry-run, --model, and --agent-timeout. They invoke the
+existing `scripts/run_iterations.py`, without changing agent installation or
+permissions. Use the same run, trust root, and budgets on resume. Older interactive
+launcher flags are replaced by this explicit scored-run interface.
+
+The controller record is adjacent to the trust bundle, outside the run. The trusted
+lead retains its anchor, runs candidate processes through `proof worker`, and owns
+budget/evaluation records. Workers can write only the candidate directory and their
+private scratch space. The trusted lead must not expose a broader filesystem tool
+server to workers. See [the framework trust boundary](../../PROOF_EVALUATION.md).
+
+N counts verified, measured checkpoints, including regressions. Each checkpoint's
+three timing trials produce one score. Failed proofs consume construction cycles
+and receive no score. Defaults are 10*N DSA cycles and no construction wall-time
+limit; --cycles and --wall-secs set explicit limits. Proof failures may prevent the
+run from reaching N scores. Restoring the best candidate preserves unfinished work.
+
+## Frozen score contract
+
+- Maximize `throughput_ops_per_sec`, the median of three fresh 30-second trials.
+- 1,000,000 shuffled loaded keys; 2,000,000 scrambled Zipf trace keys, theta 0.99,
+  seed 211, generated by the existing single-machine-kvstore generator.
+- Keys are the trace ids as zero-padded decimal `String`s (width = digits of the load
+  count); values are `i32`, the low 32 bits of a SplitMix64 hash.
+- Independent deterministic 50:50 get/put choices, seed 213; trace wraps if exhausted.
+  Key text is prepared before timing; each timed put clones its owned key.
+- Held-out draw: a second trace from seed 223 (operation seed 225), frozen and hashed
+  beside the scored one and measured with `proof evaluate --draw held-out` before a
+  new best is recorded. It never becomes a checkpoint score.
+- One thread, native Rust optimization level 3.
+- Each read checks its exact value against a shadow array; writes update that array.
+  Both costs are timed. Preloading, setup, small API smoke checks, and final sampled
+  checks are excluded; there is no separate warmup. Time is checked every 256 ops,
+  and actual elapsed time is used. Five-second intervals are saved with each trial.
+- The harness calls the formally verified trait explicitly and does not inspect
+  candidate representation fields. All operations must verify even though only
+  get/put are timed. This is volatile storage without a memory cap or concurrency;
+  it does not implement the C++ example's larger-than-memory/4 KB/16-thread task.
+
+Setup copies the generator into the evaluator, generates the scored and held-out
+traces before workers start, records checksums and relative metadata paths, writes
+the run's workload card from `spec/workload.json`, and freezes everything with the
+task and toolchain. Workload overrides (--load-count, --run-count, --seconds,
+--repeats, --seed, --held-out-seed) are explicit new-contract settings, intended also
+for small validation runs. Existing contracts cannot be reconfigured on resume.
+
+The checker verifies the candidate against the original trait and concrete exercise.
+The build driver then fully verifies the *measured crate*, including every original
+exercise assertion, and compiles it with pinned flags. It never uses --no-verify or
+partial verification. Conditional implementations, source injection, unsafe code,
+and custom macros are rejected. The benchmark driver, runtime checks, clock, and
+Verus/Rust/Z3/vstd compilation chain are trusted and outside the theorem.
+Checkpointing independently re-verifies and rebuilds, requiring identical build
+bytes. Accepted scores, per-trial details, proof identities and measured binaries
+are retained by the shared loop. The older `benchmark/` command remains a separate,
+explicitly unverified diagnostic when --allow-unverified is requested; it is not
+called by scored evaluation.
+
+## Validation and standalone proof checking
+
+```sh
+python3 synthesize/examples/verus-db/checker_tests.py
+python3 -m pytest tests/spec/test_verus_db_integration.py
+python3 synthesize/examples/verus-db/replay.py --output outputs/verus-db-replay-new
+```
+
+Replay uses two supplied fixture candidates with small traces and short timing,
+exercising actual Verus verification, scoring, reproducible checkpoint builds,
+budget exhaustion, recovery, best restoration and final export under native
+sandboxing. It validates integration, not autonomous synthesis. --full-workload
+uses the default measurement workload. Always use a fresh replay output path.
+To exercise additional native negative tests, set VERUS_DB_NATIVE_TESTS=1 when
+running the pytest file, outside any sandbox that disallows creating child sandboxes.
+
+Standalone proof-only checker (no throughput score):
+
+```sh
 SKYDISCOVER_IMPL=/absolute/path/to/candidate \
   bash synthesize/examples/verus-db/evaluator/tests/test.sh
 ```
 
-The candidate directory must contain `implementation.rs`. The standalone suite
-defaults to the adjacent `evaluator/` for its interface; the SkySynth harness sets
-`SKYDISCOVER_INTERFACE` to the run's copied interface. Both forms support
-`bash test.sh proof.py` for a named test. Verification and execution have fixed
-timeouts of 180 and 10 seconds respectively.
-
-## What's here
-
-| Path | Purpose |
-|---|---|
-| `task.md` | Formal task, candidate interface, and acceptance conditions |
-| `run_fcc.sh` | Prerequisite checks, Claude setup, and FCC launch/resume |
-| `evaluator/mod.rs` | Database spec from `~/jitskit/specs/db/mod.rs`, with the implementation marker removed |
-| `evaluator/tests/database_test.rs` | Constructor checks and concrete database tests; the Verus entry point |
-| `evaluator/tests/test.sh` | SkySynth suite entry point |
-| `evaluator/tests/proof.py` | Integrity checks, clean build, verification, compilation, and execution |
-| `checker_tests.py` | Regression tests for the checker (no reference implementation) |
-
-During setup, copy `mod.rs` to the run's
-`synthesis/evaluator/interface/` and the tests to `synthesis/tests/`.
-The checker copies the spec, database test, and candidate `.rs` files unchanged
-into a fresh temporary directory, preserving candidate submodule paths. The test
-imports the spec and implementation as separate modules and is the Verus crate
-entry point. No reference database
-implementation is shipped.
-
-The original trait is generic; this task requires the `u64` key/value instance and
-an empty constructor so the result is runnable. The constructor is an additional
-task requirement, not part of the original trait. Scan order remains unspecified.
-Storage is volatile, and no transactional or performance guarantee is claimed.
-
-The verifier and `vstd` are trusted dependencies. As in the Rocq example, a simple
-source scan rejects named proof shortcuts, including in comments. Verus checks
-ordinary Rust/Verus source with `--no-cheating`; there is no custom source grammar.
-The checker is not an OS sandbox. See the
-[Verus guidance on proof shortcuts](https://verus-lang.github.io/verus/guide/llmforverusproof.html).
-Changing the trusted task requires intentionally updating the hashes in `proof.py`.
-
-Run checker regressions with `python3 synthesize/examples/verus-db/checker_tests.py`.
+The checker supports candidate-local .rs modules and checks every module for proof
+shortcuts. Verifier errors, missing tools, timeouts, empty/partial verification
+summaries, and failed runtime checks are failures. The trait's pinned hash may not
+be changed to accommodate a candidate.

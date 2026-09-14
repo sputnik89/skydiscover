@@ -1,0 +1,14 @@
+{
+  "source": "single-machine-kvstore's trace generator (evaluator/generate.py zipf), copied into the run and frozen by prepare.py",
+  "size": "load_count keys preloaded and run_count run keys per draw (defaults 1,000,000 and 2,000,000)",
+  "dimensions": {
+    "key_distribution": "scrambled Zipf, theta 0.99, over the preloaded key ids",
+    "key_encoding": "each key id as a zero-padded decimal String; width = digits of load_count (7 for 1,000,000), so string order matches numeric order",
+    "value_type": "i32: the low 32 bits of a SplitMix64 hash of the key id (preload) or of operation index XOR key id (writes)",
+    "operation_mix": "independent deterministic 50:50 get/put choices; the trace wraps if exhausted",
+    "timed_operations": "get and put only; scan and sort are verified but not timed",
+    "concurrency": "one thread",
+    "draws": "scored: seed 211, operation seed 213 (every checkpoint); held-out: seed 223, operation seed 225 (checked before a new best, never a score)"
+  },
+  "scored_configuration": "_WRITTEN_BY_PREPARE_"
+}

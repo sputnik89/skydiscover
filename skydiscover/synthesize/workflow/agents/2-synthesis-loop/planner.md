@@ -26,8 +26,14 @@ structural rethink. Keep the plan honest and the next brief actionable.
   cards when the run has them), `specification/references/skeleton.json`, and the reference
   systems' `references/<name>/design_principles.json` (the mechanisms they chose and the trade-off
   each records; candidates draw on them without copying one system). On the proof path
-  (`checked_by: proof`) the spec is the formal spec and the pinned theorem instead.
+  (`checked_by: proof`) also read the formal spec and pinned theorem. Scored proof tasks retain
+  workload, environment, and performance evidence.
 - The leaderboard, the decision log, the latest profile, and the critic's last feedback.
+- On the proof path, the wrong implementation and proof moves: `synthesis/proof-log.md` (every DSA
+  cycle, its checker response, and its dead ends), `synthesis/proof-moves/` (the rejected moves
+  themselves, one diff per rejected step, named in the log), `synthesis/proof-strategy.md` (each
+  ISA redesign), and the attempts in `synthesis/loop.json` (a `failed` attempt's `reason` names the
+  obligation that never closed). Read them; never edit them.
 - The one file you own: `<run>/synthesis/plan.md`, with four sections in this order:
   `## Workload`, `## Candidates`, `## Brief`, `## Learnings`.
 
@@ -35,7 +41,7 @@ structural rethink. Keep the plan honest and the next brief actionable.
 
 1. **First invocation of a run: seed the plan.**
    - `## Workload`: one paragraph on what makes the workload's signature exploitable (on the proof
-     path: what the spec's guard and history make hard, in one paragraph).
+     path also explain what the spec's guard and history make hard).
    - `## Candidates`: the distinct candidate architectures worth holding open (usually three to
      five; fewer when the design space is narrow), each with its expected bottleneck and the
      evidence that would justify pivoting to it.
@@ -46,6 +52,11 @@ structural rethink. Keep the plan honest and the next brief actionable.
    - Pivot: the evidence rules the current approach out. Record it under `## Learnings` with the
      numbers that killed it, then pick a candidate not yet ruled out (or add a new one, with
      rationale). Never re-propose a ruled-out design without new evidence.
+   - Proof dead end (proof path): an attempt that ended `failed`, or an ISA redesign that
+     abandoned a representation, is evidence too. Record under `## Learnings` the design, the
+     obligation that would not close, and why (from `proof-log.md` and the rejected diffs in
+     `proof-moves/`), then treat that design as
+     ruled out for proof like any other.
 3. **Rewrite `## Brief`.** Briefly: the candidate (named from `## Candidates`); the key data
    structures with their estimated budget footprint; the one next change and its expected
    mechanism; the measurement that will falsify it. The last good brief plus the best-so-far
@@ -69,3 +80,5 @@ fresh coding agent.
   the code. One concrete next change per brief.
 
 Shared rules for every role: `skydiscover/synthesize/workflow/SKILL.md`, "Rules That Hold Everywhere".
+
+On proof candidates, provide an optimization direction and falsifiable performance target; leave the concrete implementation, relation, and crux lemma to DSA/ISA. You own the outer brief. ISA returns an inner construction strategy through the lead.

@@ -51,8 +51,11 @@ accepts it. You do not decide correctness; the type checker does.
    snapshot) and take a different step: a different tactic, or, when the obligation resists
    because the representation is wrong, a revised implementation. Do not pile fixes on a broken
    path.
-4. **Append every step to `proof-log.md`**: what you tried, the checker's response, and on a dead
-   end why it failed, so the next attempt (yours or the ISA's) starts seeded, not blank.
+4. **Return every step to the lead for `proof-log.md`**: the reserved attempt/cycle ID, what you
+   tried, the checker response, and why a dead end failed. For every rejected step, before you
+   rewind, also return the move itself: the unified diff of your implementation and proof files
+   from the last type-checked state to the rejected one, with the checker's first error. The lead
+   persists these outside your writable implementation area, so a rewind never erases the evidence. Read `synthesis/proof-strategy.md` when ISA has supplied a strategy.
 5. **When everything type-checks, run the full test yourself:**
 
    ```bash
@@ -75,3 +78,5 @@ stalled the concrete reason, pointing at the design-log entries. A proof that le
 hatch or an undeclared assumption is not a proof; the test rejects it.
 
 Shared rules for every role: `skydiscover/synthesize/workflow/SKILL.md`, "Rules That Hold Everywhere".
+
+Your reserved cycle is an inner construction step, not final delivery. Use a bounded worker timeout; return partial progress on exhaustion. Never edit the task, interface, checker, benchmark, trust anchor, budget record, or outer plan. Full pinned verification and benchmarking are the evaluator's next stage, even if your incremental check passes.
