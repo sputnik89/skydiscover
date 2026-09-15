@@ -107,6 +107,12 @@ def invoke(command: list[str], prompt: str, run: Run, timeout: int, label: str) 
             ) from None
         if process.returncode:
             raise RuntimeError(f"Agent exited {process.returncode}; progress kept. See {log}")
+    marker = run.synthesis / ".worker-active.json"
+    if marker.exists():
+        raise RuntimeError(
+            "Lead exited while a candidate worker was active; progress kept. "
+            f"The worker marker remains at {marker}; see {log}"
+        )
     return log
 
 
@@ -117,6 +123,9 @@ Continue the prepared scored proof run at {run.path}; do not create a new run or
 Read its plan, proof strategy/log, decision log, and synthesis/loop.json before acting.
 The trusted contract is already frozen. Retain the inherited external anchor values.
 Complete exactly ONE further scored iteration, then return to this controller.
+Every DSA/ISA worker must be run synchronously through `spec.proof worker`; do not background it,
+delegate it and end this session, or return until its report has been collected. The controller
+will reject a session that exits while a worker is still active.
 Current scores: {state['scored']}/{limits['iterations']}; DSA cycles: {state['cycles']}/{limits['cycles']}.
 Do not reset or edit the budget record. Use loop begin only if there is no active attempt;
 resume an active attempt otherwise. Reserve loop cycle before each DSA substep. Use isolated
@@ -222,6 +231,11 @@ def main(argv: list[str] | None = None) -> int:
         help="codex only: Codex's shell sandbox; off bypasses it (required on macOS with sandbox isolation)",
     )
     parser.add_argument(
+        "--permission-mode",
+        choices=["acceptEdits", "auto", "bypassPermissions", "dontAsk"],
+        help="claude only: permission mode for the unattended lead (default: the agent's own settings)",
+    )
+    parser.add_argument(
         "--codex-bypass-hook-trust",
         action="store_true",
         help="codex only: run the project's hooks without Codex's persisted hook trust",
@@ -266,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.agent == "codex":
             command = codex_command(args)
         else:
+            # The session starts in the run directory; it must reach SKILL.md and scripts/.
             command = [
                 args.agent,
                 "-p",
@@ -273,7 +288,11 @@ def main(argv: list[str] | None = None) -> int:
                 "text",
                 "--plugin-dir",
                 str(KIT / "workflow"),
+                "--add-dir",
+                str(KIT),
             ]
+            if args.permission_mode:
+                command += ["--permission-mode", args.permission_mode]
             if args.model:
                 command += ["--model", args.model]
         if args.dry_run:

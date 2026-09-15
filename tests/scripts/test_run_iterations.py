@@ -181,6 +181,23 @@ def test_invoke_timeout_preserves_logs_and_stops_child(formal):
     assert list((run.synthesis / "launcher").glob("timeout-*.log"))
 
 
+def test_invoke_rejects_a_lead_that_left_a_worker_active(formal, tmp_path):
+    run, _ = formal
+    marker = run.synthesis / ".worker-active.json"
+
+    # The fake lead exits normally, but simulates a child worker that outlived it.
+    command = [
+        sys.executable,
+        "-c",
+        "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text('{\"pid\": 123}')",
+        str(marker),
+    ]
+    with pytest.raises(RuntimeError, match="worker was active"):
+        runner.invoke(command, "work", run, 10, "worker-lost")
+    assert marker.is_file()
+    marker.unlink()
+
+
 @pytest.mark.parametrize("value", ["0", "-1"])
 def test_nonpositive_iteration_count_is_rejected(value):
     with pytest.raises(SystemExit):

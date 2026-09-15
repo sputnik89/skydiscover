@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from .paths import Run, run_cli
@@ -366,15 +367,39 @@ def worker(run_dir: Path, command: list[str], timeout: int) -> str:
     if not command or timeout <= 0:
         raise ValueError("A worker command and positive timeout are required")
     run.impl.mkdir(parents=True, exist_ok=True)
+    marker = run.synthesis / ".worker-active.json"
+    if marker.exists():
+        try:
+            previous = json.loads(marker.read_text())
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        pid = previous.get("pid")
+        live = False
+        if isinstance(pid, int) and pid > 0:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                live = True
+            else:
+                live = True
+        if live:
+            raise ValueError(f"A candidate worker is already active (pid {pid})")
+        marker.unlink(missing_ok=True)
+    marker.write_text(json.dumps({"pid": os.getpid(), "started": time.time()}) + "\n")
     with tempfile.TemporaryDirectory(prefix="skysynth-worker-") as tmp:
-        scratch = Path(tmp).resolve()
-        writable = run.impl.resolve()
-        # Deny paths with symlinks before granting the writable subtree.
-        digest(run.impl)
-        env = dict(os.environ, TMPDIR=str(scratch), SKYDISCOVER_IMPL=str(writable))
-        # Network is needed for model API calls; external tools must not expose writable host paths.
-        argv = confined(command, [writable, scratch], network=True)
-        return execute(argv, writable, env, timeout)
+        try:
+            scratch = Path(tmp).resolve()
+            writable = run.impl.resolve()
+            # Deny paths with symlinks before granting the writable subtree.
+            digest(run.impl)
+            env = dict(os.environ, TMPDIR=str(scratch), SKYDISCOVER_IMPL=str(writable))
+            # Network is needed for model API calls; external tools must not expose writable host paths.
+            argv = confined(command, [writable, scratch], network=True)
+            return execute(argv, writable, env, timeout)
+        finally:
+            marker.unlink(missing_ok=True)
 
 
 def main(argv=None) -> int:

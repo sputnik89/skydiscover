@@ -13,6 +13,8 @@ from prepare import KIT, arguments, controller_path, prepare
 from skydiscover.synthesize.spec import proof
 from skydiscover.synthesize.spec.paths import Run
 
+PERMISSION_MODES = ["acceptEdits", "auto", "bypassPermissions", "dontAsk"]
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -28,6 +30,7 @@ def main():
         "--codex-sandbox", choices=["workspace-write", "off"], default="workspace-write"
     )
     parser.add_argument("--codex-bypass-hook-trust", action="store_true")
+    parser.add_argument("--permission-mode", choices=PERMISSION_MODES)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -55,6 +58,7 @@ def main():
                 "agent_timeout",
                 "codex_sandbox",
                 "codex_bypass_hook_trust",
+                "permission_mode",
                 "prepare_only",
                 "dry_run",
             }
@@ -104,6 +108,8 @@ def main():
     ]
     if args.model:
         command += ["--model", args.model]
+    if args.permission_mode and args.agent != "codex":
+        command += ["--permission-mode", args.permission_mode]
     if args.agent == "codex":
         command += ["--codex-sandbox", args.codex_sandbox]
         if args.codex_bypass_hook_trust:

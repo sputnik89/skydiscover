@@ -48,6 +48,8 @@ Agent:
   --agent NAME         claude (default), fcc-claude, or codex
   --model NAME         model passed to the agent
   --agent-timeout S    seconds per lead session (default 3600)
+  --permission-mode M  claude only: acceptEdits, auto, bypassPermissions, or dontAsk; the lead runs
+                       unattended, so anything its mode would prompt for is denied
   --codex-sandbox MODE workspace-write (default) or off; see the README before using off on macOS
   --codex-bypass-hook-trust
                        run the project's hooks without Codex's persisted hook trust
@@ -95,6 +97,7 @@ model=""
 agent_timeout="3600"
 codex_sandbox="workspace-write"
 codex_bypass_hook_trust=0
+permission_mode=""
 export_to="."
 prepare_only=0
 dry_run=0
@@ -121,6 +124,7 @@ while (($#)); do
     --agent-timeout) need "$@"; agent_timeout="$2"; shift 2 ;;
     --codex-sandbox) need "$@"; codex_sandbox="$2"; shift 2 ;;
     --codex-bypass-hook-trust) codex_bypass_hook_trust=1; shift ;;
+    --permission-mode) need "$@"; permission_mode="$2"; shift 2 ;;
     --export-to) need "$@"; export_to="$2"; shift 2 ;;
     --prepare-only) prepare_only=1; shift ;;
     --dry-run) dry_run=1; shift ;;
@@ -339,6 +343,9 @@ Continue the prepared scored proof run at $run; do not create a new run or chang
 Read its plan, proof strategy/log, decision log, synthesis/loop.json, and specification/cards/workload.json before acting.
 The trusted contract is already frozen. Retain the inherited external anchor values.
 Complete exactly ONE further scored iteration, then return to this controller.
+Every DSA/ISA worker must be run synchronously through spec.proof worker; do not background it,
+delegate it and end this session, or return until its report has been collected. The controller
+will reject a session that exits while a worker is still active.
 Current scores: $(jq -r .scored_iterations <<<"$st")/$iterations; DSA cycles: $(jq -r .cycles <<<"$st")/$cycles.
 Do not reset or edit the budget record. Use loop begin only if there is no active attempt;
 resume an active attempt otherwise. Reserve loop cycle before each DSA substep. Use isolated
@@ -378,7 +385,11 @@ if [[ "$agent" == codex ]]; then
   [[ -z "$model" ]] || agent_command+=(--model "$model")
   agent_command+=(-)
 else
-  agent_command=("$agent" -p --output-format text --plugin-dir "$kit/workflow")
+  # A print session runs from the run directory and cannot answer permission prompts: --add-dir
+  # lets it read SKILL.md and run scripts/ from the kit, and --permission-mode (when given) decides
+  # which of the workflow's commands it may run unattended.
+  agent_command=("$agent" -p --output-format text --plugin-dir "$kit/workflow" --add-dir "$kit")
+  [[ -z "$permission_mode" ]] || agent_command+=(--permission-mode "$permission_mode")
   [[ -z "$model" ]] || agent_command+=(--model "$model")
 fi
 
