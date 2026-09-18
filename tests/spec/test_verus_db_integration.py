@@ -51,7 +51,8 @@ def test_prepare_freezes_workload_and_retains_external_anchor(tmp_path, monkeypa
     run = Run(tmp_path / "run")
     trust = tmp_path / "trust"
     control = setup.prepare(
-        run.path, trust, iterations=3, load_count=32, run_count=128, seconds=0.01, repeats=1
+        run.path, trust, iterations=3, load_count=32, run_count=128, seconds=0.01, repeats=1,
+        threads=4, optimize_for="scan", scan_width=7,
     )
     monkeypatch.setenv("SKYDISCOVER_PROOF_TRUST", control["trust"])
     monkeypatch.setenv("SKYDISCOVER_PROOF_CONTRACT", control["contract"])
@@ -71,6 +72,10 @@ def test_prepare_freezes_workload_and_retains_external_anchor(tmp_path, monkeypa
         assert metadata["params"]["theta"] == 0.99 and metadata["params"]["scramble"]
         assert metadata["params"]["seed"] == draws[draw]["seed"]
     cfg = json.loads(run.proof_config.read_text())
+    assert cfg["objective"] == "scan_ops_per_sec"
+    assert cfg["config"]["threads"] == 4
+    assert cfg["config"]["scan_width"] == 7
+    assert cfg["config"]["operators"] == ["get", "put", "scan", "sort"]
     assert "held_out_benchmark" in cfg
     assert json.loads(run.workload_card.read_text())["scored_configuration"] == cfg["config"]
     for name in (
@@ -105,6 +110,28 @@ def test_prepare_freezes_workload_and_retains_external_anchor(tmp_path, monkeypa
     assert resumed.returncode == 0, resumed.stderr
     changed = subprocess.run(command + ["--seconds", "2"], capture_output=True, text=True)
     assert changed.returncode != 0 and "Cannot change frozen workload" in changed.stderr
+    for args in (["--threads", "8"], ["--optimize-for", "put"], ["--scan-width", "8"]):
+        changed = subprocess.run(command + args, capture_output=True, text=True)
+        assert changed.returncode != 0 and "Cannot change frozen workload" in changed.stderr
+
+
+@pytest.mark.parametrize("operator", ["get", "put", "scan", "sort"])
+def test_objective_configuration(tmp_path, monkeypatch, setup, operator):
+    monkeypatch.setattr(setup, "tools_config", lambda *args: {"files": {}})
+    setup.prepare(tmp_path / "run", tmp_path / "trust", load_count=4, run_count=8,
+                  seconds=.01, repeats=1, optimize_for=operator)
+    config = json.loads(Run(tmp_path / "run").proof_config.read_text())
+    assert config["objective"] == operator + "_ops_per_sec"
+
+
+@pytest.mark.parametrize("options", [
+    {"threads": 0}, {"threads": -1}, {"threads": 1.5},
+    {"scan_width": 0}, {"optimize_for": "mixed"},
+])
+def test_invalid_concurrency_settings(tmp_path, setup, options):
+    with pytest.raises(ValueError):
+        setup.prepare(tmp_path / "run", tmp_path / "trust", **options)
+    assert not (tmp_path / "run").exists()
 
 
 @pytest.mark.parametrize("seconds", [float("nan"), float("inf"), 0, -1])
@@ -124,6 +151,44 @@ def test_driver_rejects_changed_toolchain_file(tmp_path, monkeypatch, driver):
     binary.write_bytes(b"replacement")
     with pytest.raises(ValueError, match="Pinned toolchain"):
         driver.toolchain()
+
+
+def test_operator_trials_are_measured_separately(tmp_path, monkeypatch, driver, capsys):
+    config = {
+        "trace_sha256": {}, "draws": {"scored": {
+            "load_file": "load", "run_file": "run", "operation_seed": 213,
+        }}, "operators": ["get", "put", "scan", "sort"], "threads": 8,
+        "scan_width": 16, "repeats": 3, "seconds": 1,
+    }
+    (tmp_path / "workload.json").write_text(json.dumps(config))
+    monkeypatch.setattr(driver, "HERE", tmp_path)
+    calls = []
+
+    def measure(command, **kwargs):
+        op = command[6]
+        calls.append(op)
+        rate = (config["operators"].index(op) + 1) * 100
+        result = {"operator": op, "threads": 8, "operations": rate,
+                  "seconds": 1, "ops_per_second": rate, "runtime_checks_passed": True}
+        return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
+
+    monkeypatch.setattr(driver.subprocess, "run", measure)
+    driver.benchmark("program")
+    result = json.loads(capsys.readouterr().out)
+    assert result["metrics"] == {
+        "get_ops_per_sec": 100, "put_ops_per_sec": 200,
+        "scan_ops_per_sec": 300, "sort_ops_per_sec": 400,
+    }
+    assert calls == [op for op in config["operators"] for _ in range(3)]
+
+    def wrong_operator(command, **kwargs):
+        result = json.loads(measure(command).stdout)
+        result["operator"] = "mixed"
+        return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
+
+    monkeypatch.setattr(driver.subprocess, "run", wrong_operator)
+    with pytest.raises(ValueError, match="validation failed"):
+        driver.benchmark("program")
 
 
 def build_fixture(tmp_path, monkeypatch, driver):

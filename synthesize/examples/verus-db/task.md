@@ -29,7 +29,8 @@ original trait. `evaluator/tests/database_test.rs` checks it is callable without
 preconditions and invokes the original trait via fully qualified calls.
 
 This task covers a single-process, in-memory database. Persistence, transactions,
-SQL, and concurrency are not specified by this contract. Optimize verified throughput
+SQL, and internal concurrency are not specified by this contract. The benchmark requires
+`VerifiedDb: Send + Sync` and wraps one instance in a trusted read/write lock. Optimize verified throughput
 under the frozen workload in evaluator/proof.json and interface/workload.json.
 
 ## What to read and write
@@ -93,14 +94,26 @@ checkpoint counts once, including regressions. Three timing trials form one scor
 Failed proofs receive no score and consume construction budget. ISA does not reset
 budgets. Restore the best eligible candidate and independently reverify for delivery.
 
-Default score: maximize median throughput_ops_per_sec across three 30-second runs,
-each freshly preloaded with 1,000,000 shuffled keys. Use the single-machine-kvstore
-scrambled Zipf generator (theta 0.99, seed 211, 2,000,000 run keys), independent
-50:50 read/write choices, and one thread. Each key id becomes a zero-padded decimal
-`String` (7 characters for 1,000,000 keys); values are `i32`. The frozen workload
-configuration is authoritative for a particular run, including explicit small
-validation configurations. Every read is checked against a shadow value array.
-Only get/put are timed; all four operations and the constructor must verify.
+Report separate `get_ops_per_sec`, `put_ops_per_sec`, `scan_ops_per_sec`, and
+`sort_ops_per_sec`: median of three fresh 30-second trials per operator. The frozen
+`optimize_for` setting selects the objective (default GET); never sum operator rates.
+Each trial preloads 1,000,000 shuffled keys and starts eight synchronized clients on
+ONE shared database. GET/SCAN/SORT use shared read guards; PUT uses an exclusive
+write guard. This preserves the proved API and serializes writes. Candidates must
+be Send + Sync; the lock adapter and concurrency orchestration are trusted, not
+part of the formal theorem.
+
+Use the scrambled Zipf generator (theta 0.99, seed 211, 2,000,000 run keys).
+Each key id becomes a zero-padded decimal String; values are i32. Each worker
+cycles through the trace from a deterministic offset. SCAN requests up to 16
+contiguous keys, clipped at the largest loaded key; SORT enumerates the entire
+store. One completed call counts as one operation, regardless of returned rows.
+Timing includes locking, result allocation/destruction, key cloning for PUT,
+GET/SCAN/SORT validation and PUT shadow updates. Setup and post-trial checks are
+excluded. Each worker checks the clock before each call; in-flight calls finish,
+and throughput uses actual wall time through the last worker's completion.
+All four operations and the constructor must still verify against the original
+trait. Small validation configurations are explicit new-run settings.
 
 A second trace, generated the same way from seed 223, is frozen as the held-out draw.
 Measure it with `proof evaluate --draw held-out` before recording a new best; it never

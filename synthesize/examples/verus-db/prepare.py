@@ -75,6 +75,9 @@ def prepare(
     run_count=2_000_000,
     seconds=30,
     repeats=3,
+    threads=8,
+    optimize_for="get",
+    scan_width=16,
     seed=211,
     held_out_seed=223,
     verus=None,
@@ -93,6 +96,8 @@ def prepare(
             load_count,
             run_count,
             repeats,
+            threads,
+            scan_width,
             seconds,
         )
         <= 0
@@ -104,6 +109,10 @@ def prepare(
         raise ValueError("The held-out draw needs a seed different from the scored seed")
     if trust.is_relative_to(run_dir) or run_dir.is_relative_to(trust):
         raise ValueError("Trust bundle must be outside the run")
+    if any(type(v) is not int or v <= 0 for v in (threads, scan_width)):
+        raise ValueError("threads and scan_width must be positive integers")
+    if optimize_for not in ("get", "put", "scan", "sort"):
+        raise ValueError("optimize_for must name a Database operator")
     settings = tools_config(verus, z3)
     run = Run(run_dir).create()
     shutil.copy2(HERE / "task.md", run.task)
@@ -163,15 +172,19 @@ def prepare(
         run_count=run_count,
         seconds=seconds,
         repeats=repeats,
+        threads=threads,
+        optimize_for=optimize_for,
+        scan_width=scan_width,
         seed=seed,
         held_out_seed=held_out_seed,
     )
+    cfg["objective"] = f"{optimize_for}_ops_per_sec"
     cfg["workload"] = (
         f"{load_count} shuffled keys as fixed-width decimal strings; {run_count} scrambled Zipf(theta=0.99) trace, "
-        f"seed {seed} (held-out draw: seed {held_out_seed}); 50:50 get/put with i32 values; "
+        f"seed {seed} (held-out draw: seed {held_out_seed}); independent get/put/scan/sort with i32 values; {threads} clients sharing one RwLock; "
         f"median of {repeats} fresh {seconds}s trials"
     )
-    cfg["timeout"] = max(600, int(repeats * (seconds + 120)) + 60)
+    cfg["timeout"] = max(600, int(4 * repeats * (seconds + 120)) + 60)
     # Use the setup interpreter for every trusted Python command, independent of PATH on resume.
     for field in ("toolchain", "build", "benchmark", "held_out_benchmark"):
         cfg[field][0] = str(Path(sys.executable).resolve())
@@ -229,6 +242,9 @@ def arguments(parser):
     parser.add_argument("--run-count", type=int, default=2_000_000)
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--threads", type=int, default=8)
+    parser.add_argument("--optimize-for", choices=["get", "put", "scan", "sort"], default="get")
+    parser.add_argument("--scan-width", type=int, default=16)
     parser.add_argument("--seed", type=int, default=211)
     parser.add_argument("--held-out-seed", type=int, default=223)
     parser.add_argument("--verus")

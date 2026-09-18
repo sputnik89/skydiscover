@@ -21,7 +21,8 @@ def main():
     arguments(parser)
     # Workload overrides apply only when explicitly supplied, including on resume.
     parser.set_defaults(
-        load_count=None, run_count=None, seconds=None, repeats=None, seed=None, held_out_seed=None
+        load_count=None, run_count=None, seconds=None, repeats=None, seed=None, held_out_seed=None,
+        threads=None, optimize_for=None, scan_width=None
     )
     parser.add_argument("--agent", choices=["claude", "fcc-claude", "codex"], default="claude")
     parser.add_argument("--model")
@@ -81,7 +82,7 @@ def main():
     )
     proof.trusted(run)
     config = proof.config(run)["config"]
-    for name in ("load_count", "run_count", "seconds", "repeats", "seed", "held_out_seed"):
+    for name in ("load_count", "run_count", "seconds", "repeats", "seed", "held_out_seed", "threads", "optimize_for", "scan_width"):
         value = getattr(args, name)
         if value is not None and value != config[name]:
             raise ValueError(f"Cannot change frozen workload on resume: {name}")

@@ -10,6 +10,8 @@
 #   CLAUDE_USAGE_MAX_RETRIES     0 means unlimited (default 0)
 #   CLAUDE_USAGE_WAIT_ONCE       if set to 1, wait only once then stop (default 0)
 #   CLAUDE_AGENT_TIMEOUT          lead-session watchdog in seconds (default 2147483647)
+#   CLAUDE_NO_PROGRESS_WAIT_SECS  wait before retrying a no-progress stop (default 30)
+#   CLAUDE_NO_PROGRESS_MAX_RETRIES 0 means unlimited (default 0)
 #
 # Example:
 #   bash synthesize/examples/verus-db/run_loop_claude_retry.sh 3 \
@@ -31,6 +33,8 @@ wait_secs="${CLAUDE_USAGE_WAIT_SECS:-18000}"
 max_retries="${CLAUDE_USAGE_MAX_RETRIES:-0}"
 wait_once="${CLAUDE_USAGE_WAIT_ONCE:-0}"
 agent_timeout="${CLAUDE_AGENT_TIMEOUT:-2147483647}"
+no_progress_wait="${CLAUDE_NO_PROGRESS_WAIT_SECS:-30}"
+no_progress_max_retries="${CLAUDE_NO_PROGRESS_MAX_RETRIES:-0}"
 
 [[ "$wait_secs" =~ ^[1-9][0-9]*$ ]] || {
   echo "claude-retry: CLAUDE_USAGE_WAIT_SECS must be a positive integer" >&2
@@ -46,6 +50,14 @@ agent_timeout="${CLAUDE_AGENT_TIMEOUT:-2147483647}"
 }
 [[ "$agent_timeout" =~ ^[1-9][0-9]*$ ]] || {
   echo "claude-retry: CLAUDE_AGENT_TIMEOUT must be a positive integer" >&2
+  exit 2
+}
+[[ "$no_progress_wait" =~ ^[1-9][0-9]*$ ]] || {
+  echo "claude-retry: CLAUDE_NO_PROGRESS_WAIT_SECS must be a positive integer" >&2
+  exit 2
+}
+[[ "$no_progress_max_retries" =~ ^[0-9]+$ ]] || {
+  echo "claude-retry: CLAUDE_NO_PROGRESS_MAX_RETRIES must be a nonnegative integer" >&2
   exit 2
 }
 (( $# > 0 )) || {
@@ -70,6 +82,10 @@ usage_signal() {
   grep -Eiq \
     'usage[[:space:]_-]*(limit|exhausted)|session[[:space:]]+limit|weekly[[:space:]]+limit|rate[[:space:]_-]*limit|rate[[:space:]]+limited|too[[:space:]]+many[[:space:]]+requests|quota[[:space:]]+(exceeded|exhausted)|you['"'"'’]?ve[[:space:]]+hit[[:space:]]+(your|the)[[:space:]]+limit|hit[[:space:]]+your[[:space:]]+limit|resets?_at|resets?[[:space:]]+(at|in)|try[[:space:]]+again[[:space:]]+(at|in)|HTTP/[0-9.]+[[:space:]]+429' \
     "$file"
+}
+
+no_progress_signal() {
+  grep -Eiq 'agent made no counted progress; stopping instead of retrying' "$1"
 }
 
 reset_wait_secs() {
@@ -127,6 +143,7 @@ countdown() {
 
 run_number=0
 usage_retries=0
+no_progress_retries=0
 
 while true; do
   run_number=$((run_number + 1))
@@ -154,10 +171,27 @@ while true; do
   done < <(grep -Eo '/[^[:space:]]+\.log' "$capture" | sort -u)
 
   if ! usage_signal "$evidence"; then
-    echo "claude-retry: non-usage-limit failure (exit $rc); not retrying" >&2
-    echo "claude-retry: launcher output: $capture" >&2
+    if ! no_progress_signal "$evidence"; then
+      echo "claude-retry: non-retryable failure (exit $rc); not retrying" >&2
+      echo "claude-retry: launcher output: $capture" >&2
+      rm -f "$evidence"
+      exit "$rc"
+    fi
+
+    no_progress_retries=$((no_progress_retries + 1))
+    if (( no_progress_max_retries > 0 && no_progress_retries > no_progress_max_retries )); then
+      echo "claude-retry: no-progress retry budget exhausted ($no_progress_max_retries)" >&2
+      rm -f "$evidence"
+      exit "$rc"
+    fi
+
+    echo "claude-retry: Claude session ended without counted progress; run state is preserved" >&2
+    echo "claude-retry: retrying active attempt after ${no_progress_wait}s (retry $no_progress_retries)" >&2
     rm -f "$evidence"
-    exit "$rc"
+    countdown "$no_progress_wait"
+    rm -f "$capture"
+    trap - INT TERM
+    continue
   fi
 
   usage_retries=$((usage_retries + 1))

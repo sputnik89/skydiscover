@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -117,6 +118,26 @@ def build(impl, destination):
         print("Measured crate fully verified and compiled")
 
 
+def validate_trial(result, config, operator):
+    if (
+        result.get("runtime_checks_passed") is not True
+        or result.get("operator") != operator
+        or result.get("threads") != config["threads"]
+        or not isinstance(result.get("seconds"), (int, float))
+        or not math.isfinite(result["seconds"])
+        or result["seconds"] < config["seconds"]
+        or type(result.get("operations")) is not int
+        or result["operations"] <= 0
+        or not isinstance(result.get("ops_per_second"), (int, float))
+        or not math.isfinite(result["ops_per_second"])
+        or not math.isclose(
+            result["ops_per_second"], result["operations"] / result["seconds"],
+            rel_tol=1e-5,
+        )
+    ):
+        raise ValueError("Benchmark validation failed")
+
+
 def benchmark(executable, draw="scored"):
     config = json.loads((HERE / "workload.json").read_text())
     for name, digest in config["trace_sha256"].items():
@@ -125,29 +146,35 @@ def benchmark(executable, draw="scored"):
     if draw not in config["draws"]:
         raise ValueError(f"Unknown workload draw: {draw}")
     trace = config["draws"][draw]
-    results = []
-    for _ in range(config["repeats"]):
-        command = [
-            executable,
-            str(HERE / "traces" / trace["load_file"]),
-            str(HERE / "traces" / trace["run_file"]),
-            str(config["seconds"]),
-            str(trace["operation_seed"]),
-        ]
-        run = subprocess.run(
-            command, capture_output=True, text=True, check=True, timeout=config["seconds"] + 120
-        )
-        result = json.loads(run.stdout)
-        if not result["runtime_checks_passed"] or result["seconds"] < config["seconds"]:
-            raise ValueError("Benchmark validation failed")
-        results.append(result)
+    operators = config["operators"]
+    if not operators or len(set(operators)) != len(operators) or any(
+        op not in ("get", "put", "scan", "sort") for op in operators
+    ):
+        raise ValueError("Expected distinct Database operators")
+    results = {op: [] for op in operators}
+    for operator in operators:
+        for _ in range(config["repeats"]):
+            command = [
+                executable,
+                str(HERE / "traces" / trace["load_file"]),
+                str(HERE / "traces" / trace["run_file"]),
+                str(config["seconds"]),
+                str(trace["operation_seed"]),
+            ]
+            command += [str(config["threads"]), operator, str(config["scan_width"])]
+            run = subprocess.run(
+                command, capture_output=True, text=True, check=True, timeout=config["seconds"] + 120
+            )
+            result = json.loads(run.stdout)
+            validate_trial(result, config, operator)
+            results[operator].append(result)
     print(
         json.dumps(
             {
                 "metrics": {
-                    "throughput_ops_per_sec": statistics.median(
-                        r["ops_per_second"] for r in results
-                    )
+                    f"{operator}_ops_per_sec": statistics.median(
+                        r["ops_per_second"] for r in trials
+                    ) for operator, trials in results.items()
                 },
                 "draw": draw,
                 "trials": results,

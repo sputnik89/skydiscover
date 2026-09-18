@@ -5,10 +5,12 @@
     "key_distribution": "scrambled Zipf, theta 0.99, over the preloaded key ids",
     "key_encoding": "each key id as a zero-padded decimal String; width = digits of load_count (7 for 1,000,000), so string order matches numeric order",
     "value_type": "i32: the low 32 bits of a SplitMix64 hash of the key id (preload) or of operation index XOR key id (writes)",
-    "operation_mix": "independent deterministic 50:50 get/put choices; the trace wraps if exhausted",
-    "timed_operations": "get and put only; scan and sort are verified but not timed",
-    "concurrency": "one thread",
-    "draws": "scored: seed 211, operation seed 213 (every checkpoint); held-out: seed 223, operation seed 225 (checked before a new best, never a score)"
+    "operation_mix": "Separate homogeneous trials for each of get, put, scan, sort; trace wraps independently per worker",
+    "timed_operations": "All four operators, reported in completed calls per wall second; scan returns up to scan_width contiguous keys, sort returns all loaded keys",
+    "concurrency": "threads clients (default 8), one shared database under a trusted std::sync::RwLock; get/scan/sort share read guards, put takes an exclusive write guard",
+    "draws": "scored: seed 211, operation seed 213 (every checkpoint); held-out: seed 223, operation seed 225 (checked before a new best, never a score)",
+    "validation": "GET values and every SCAN/SORT row checked while timed; PUT shadow state updated under the same write guard, final values sampled outside timing",
+    "selection": "optimize_for selects one operator metric; no cross-operator aggregate"
   },
   "scored_configuration": "_WRITTEN_BY_PREPARE_"
 }

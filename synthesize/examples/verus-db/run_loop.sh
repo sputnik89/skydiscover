@@ -36,6 +36,9 @@ Workload (new runs; on resume they must match the frozen values):
   --run-count N        run keys per draw (default 2000000)
   --seconds S          seconds per timed trial (default 30)
   --repeats N          trials per measurement (default 3)
+  --threads N          client threads sharing one database (default 8)
+  --optimize-for OP    get|put|scan|sort selection objective (default get)
+  --scan-width N       maximum keys per inclusive scan (default 16)
   --seed N             scored draw seed (default 211)
   --held-out-seed N    held-out draw seed (default 223)
   --seed-from DIR      copy an existing candidate into the new run as an unverified seed
@@ -87,6 +90,9 @@ load_count=""
 run_count=""
 seconds=""
 repeats=""
+threads=""
+optimize_for=""
+scan_width=""
 seed=""
 held_out_seed=""
 seed_from=""
@@ -114,6 +120,9 @@ while (($#)); do
     --run-count) need "$@"; run_count="$2"; shift 2 ;;
     --seconds) need "$@"; seconds="$2"; shift 2 ;;
     --repeats) need "$@"; repeats="$2"; shift 2 ;;
+    --threads) need "$@"; threads="$2"; shift 2 ;;
+    --optimize-for) need "$@"; optimize_for="$2"; shift 2 ;;
+    --scan-width) need "$@"; scan_width="$2"; shift 2 ;;
     --seed) need "$@"; seed="$2"; shift 2 ;;
     --held-out-seed) need "$@"; held_out_seed="$2"; shift 2 ;;
     --seed-from) need "$@"; seed_from="$2"; shift 2 ;;
@@ -142,6 +151,9 @@ nonnegative='^[0-9]+$'
 [[ -z "$load_count" || ("$load_count" =~ $positive && "$load_count" -ge 2) ]] || die "--load-count must be an integer >= 2"
 [[ -z "$run_count" || "$run_count" =~ $positive ]] || die "--run-count must be a positive integer"
 [[ -z "$repeats" || "$repeats" =~ $positive ]] || die "--repeats must be a positive integer"
+[[ -z "$threads" || "$threads" =~ $positive ]] || die "--threads must be positive"
+[[ -z "$scan_width" || "$scan_width" =~ $positive ]] || die "--scan-width must be positive"
+[[ -z "$optimize_for" || "$optimize_for" =~ ^(get|put|scan|sort)$ ]] || die "--optimize-for must name an operator"
 [[ -z "$seed" || "$seed" =~ $nonnegative ]] || die "--seed must be a nonnegative integer"
 [[ -z "$held_out_seed" || "$held_out_seed" =~ $nonnegative ]] || die "--held-out-seed must be a nonnegative integer"
 if [[ -n "$seconds" ]]; then
@@ -211,6 +223,9 @@ prepare_run() {
   run_count="${run_count:-2000000}"
   seconds="${seconds:-30}"
   repeats="${repeats:-3}"
+  threads="${threads:-8}"
+  optimize_for="${optimize_for:-get}"
+  scan_width="${scan_width:-16}"
   seed="${seed:-211}"
   held_out_seed="${held_out_seed:-223}"
   [[ "$held_out_seed" != "$seed" ]] || die "the held-out draw needs a seed different from --seed"
@@ -250,13 +265,15 @@ prepare_run() {
   done
 
   local timeout workload_text
-  timeout="$(awk -v r="$repeats" -v s="$seconds" 'BEGIN { t = int(r * (s + 120)) + 60; print (t > 600 ? t : 600) }')"
-  workload_text="$load_count shuffled keys as fixed-width decimal strings; $run_count scrambled Zipf(theta=0.99) trace, seed $seed (held-out draw: seed $held_out_seed); 50:50 get/put with i32 values; median of $repeats fresh ${seconds}s trials"
+  timeout="$(awk -v r="$repeats" -v s="$seconds" 'BEGIN { t = int(4 * r * (s + 120)) + 60; print (t > 600 ? t : 600) }')"
+  workload_text="$load_count shuffled keys as fixed-width decimal strings; $run_count scrambled Zipf(theta=0.99) trace, seed $seed (held-out draw: seed $held_out_seed); independent get/put/scan/sort with i32 values; $threads clients sharing one RwLock; median of $repeats fresh ${seconds}s trials"
   jq --arg py "$py_bin" --arg workload "$workload_text" --argjson timeout "$timeout" \
     --argjson load_count "$load_count" --argjson run_count "$run_count" --argjson seconds "$seconds" \
+    --argjson threads "$threads" --arg optimize_for "$optimize_for" --argjson scan_width "$scan_width" \
     --argjson repeats "$repeats" --argjson seed "$seed" --argjson held_out_seed "$held_out_seed" \
     '.config += {load_count: $load_count, run_count: $run_count, seconds: $seconds, repeats: $repeats,
-                 seed: $seed, held_out_seed: $held_out_seed}
+                 seed: $seed, held_out_seed: $held_out_seed, threads: $threads, optimize_for: $optimize_for, scan_width: $scan_width}
+     | .objective = ($optimize_for + "_ops_per_sec")
      | .workload = $workload | .timeout = $timeout
      | reduce ("toolchain", "build", "benchmark", "held_out_benchmark") as $field (.; .[$field][0] = $py)' \
     "$example/evaluator/proof.json" >"$proof_config"
@@ -309,13 +326,17 @@ resume_run() {
   [[ -z "$wall_secs" || "$wall_secs" == "$saved" ]] || die "resume must keep --wall-secs $saved"
   wall_secs="$saved"
   local name value frozen
-  for name in load_count run_count seconds repeats seed held_out_seed; do
+  for name in load_count run_count seconds repeats seed held_out_seed threads scan_width; do
     value="${!name}"
     [[ -n "$value" ]] || continue
     frozen="$(jq -r --arg name "$name" '.config[$name]' "$proof_config")"
     awk -v a="$value" -v b="$frozen" 'BEGIN { exit !(a + 0 == b + 0) }' \
       || die "cannot change the frozen workload on resume: --${name//_/-} is $frozen"
   done
+  if [[ -n "$optimize_for" ]]; then
+    [[ "$optimize_for" == "$(jq -r .config.optimize_for "$proof_config")" ]] \
+      || die "cannot change frozen --optimize-for on resume"
+  fi
   for name in verus z3; do
     value="$([[ $name == verus ]] && echo "$verus_arg" || echo "$z3_arg")"
     [[ -n "$value" ]] || continue
